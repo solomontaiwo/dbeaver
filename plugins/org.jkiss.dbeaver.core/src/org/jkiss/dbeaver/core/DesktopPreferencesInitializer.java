@@ -60,6 +60,7 @@ public class DesktopPreferencesInitializer extends AbstractPreferenceInitializer
         PrefUtils.setDefaultPreferenceValue(store, DBeaverPreferences.TEXT_EDIT_UNDO_LEVEL, 200);
 
         // General UI
+        PrefUtils.setDefaultPreferenceValue(store, DBeaverPreferences.UI_THEME_MODE, DBeaverPreferences.UI_THEME_MODE_AUTO);
         PrefUtils.setDefaultPreferenceValue(store, DBeaverPreferences.UI_AUTO_UPDATE_CHECK,
             !ApplicationPolicyService.getInstance().isInstallUpdateDisabled());
         PrefUtils.setDefaultPreferenceValue(store, UIPreferences.UI_USE_EMBEDDED_AUTH, false);

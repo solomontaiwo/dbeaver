@@ -43,6 +43,13 @@ public final class DBeaverPreferences
     private static final String PROPERTY_USE_ALL_COLUMNS_QUIET = "virtual-key-quiet";
 
     // General UI
+    public static final String UI_THEME_MODE = "ui.theme.mode"; //$NON-NLS-1$
+    /** Preference value for {@link #UI_THEME_MODE}: follow the OS dark/light setting (default). */
+    public static final String UI_THEME_MODE_AUTO = "auto"; //$NON-NLS-1$
+    /** Preference value for {@link #UI_THEME_MODE}: always use the light theme. */
+    public static final String UI_THEME_MODE_LIGHT = "light"; //$NON-NLS-1$
+    /** Preference value for {@link #UI_THEME_MODE}: always use the dark theme. */
+    public static final String UI_THEME_MODE_DARK = "dark"; //$NON-NLS-1$
     public static final String UI_AUTO_UPDATE_CHECK = "ui.auto.update.check"; //$NON-NLS-1$
     public static final String UI_UPDATE_CHECK_TIME = "ui.auto.update.check.time"; //$NON-NLS-1$
     public static final String UI_KEEP_DATABASE_EDITORS = DatabaseEditorPreferences.PROP_SAVE_EDITORS_STATE; //$NON-NLS-1$
