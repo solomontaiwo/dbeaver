@@ -169,14 +169,30 @@ public class SystemThemeMonitor {
             "/v", "AppsUseLightTheme"
         });
         String output = readProcessOutput(process);
-        // "AppsUseLightTheme    REG_DWORD    0x0"  → dark mode
-        // "AppsUseLightTheme    REG_DWORD    0x1"  → light mode
-        if (output.contains("0x0") || output.contains("0x00")) {
-            return true;
+        // Example outputs:
+        // "AppsUseLightTheme    REG_DWORD    0x0"   → dark mode
+        // "AppsUseLightTheme    REG_DWORD    0x1"   → light mode
+        // "AppsUseLightTheme    REG_DWORD    0x01"  → light mode
+
+        if (output != null) {
+            String valueHex = null;
+            String[] tokens = output.trim().split("\\s+");
+            for (String token : tokens) {
+                if (token.startsWith("0x") || token.startsWith("0X")) {
+                    valueHex = token;
+                }
+            }
+            if (valueHex != null && valueHex.length() > 2) {
+                try {
+                    int value = Integer.parseInt(valueHex.substring(2), 16);
+                    // 0 → dark mode, non-zero (typically 1) → light mode
+                    return value == 0;
+                } catch (NumberFormatException ignored) {
+                    // fall through to default (light mode)
+                }
+            }
         }
-        if (output.contains("0x1") || output.contains("0x01")) {
-            return false;
-        }
+        // Default to light mode if detection fails
         return false;
     }
 
