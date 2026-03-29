@@ -293,6 +293,9 @@ public class ApplicationWorkbenchAdvisor extends IDEWorkbenchAdvisor {
         if (DBWorkbench.getPlatform() instanceof DesktopPlatform platformDesktop) {
             platformDesktop.setWorkbenchStarted(true);
         }
+
+        // Install the OS theme monitor so DBeaver can follow the system dark/light setting
+        SystemThemeMonitor.install(Display.getCurrent());
     }
 
     private void filterPreferencePages() {

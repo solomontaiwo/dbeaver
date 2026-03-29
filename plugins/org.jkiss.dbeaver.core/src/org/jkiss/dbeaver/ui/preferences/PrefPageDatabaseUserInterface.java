@@ -83,6 +83,7 @@ public class PrefPageDatabaseUserInterface extends AbstractPrefPage implements I
     private Button statusBarShowBreadcrumbsCheck;
     private Button statusBarShowStatusCheck;
     private Combo statusBarBreadcrumbPositionCombo;
+    private Combo themeCombo;
 
     public PrefPageDatabaseUserInterface()
     {
@@ -115,6 +116,25 @@ public class PrefPageDatabaseUserInterface extends AbstractPrefPage implements I
                 false,
                 2);
         }
+
+        {
+            Composite appearanceGroup = UIUtils.createTitledComposite(
+                composite,
+                CoreMessages.pref_page_ui_general_group_appearance,
+                2,
+                GridData.FILL_HORIZONTAL | GridData.VERTICAL_ALIGN_BEGINNING
+            );
+            themeCombo = UIUtils.createLabelCombo(appearanceGroup,
+                CoreMessages.pref_page_ui_general_combo_theme,
+                CoreMessages.pref_page_ui_general_combo_theme_tip,
+                SWT.READ_ONLY | SWT.DROP_DOWN
+            );
+            themeCombo.setLayoutData(new GridData(GridData.HORIZONTAL_ALIGN_BEGINNING));
+            themeCombo.add(CoreMessages.pref_page_ui_general_combo_theme_auto);
+            themeCombo.add(CoreMessages.pref_page_ui_general_combo_theme_light);
+            themeCombo.add(CoreMessages.pref_page_ui_general_combo_theme_dark);
+        }
+
         if (isStandalone) {
             Composite regionalSettingsGroup = UIUtils.createTitledComposite(
                 composite,
@@ -280,6 +300,16 @@ public class PrefPageDatabaseUserInterface extends AbstractPrefPage implements I
             }
         }
 
+        // Theme mode combo
+        String themeMode = store.getString(DBeaverPreferences.UI_THEME_MODE);
+        if (DBeaverPreferences.UI_THEME_MODE_DARK.equals(themeMode)) {
+            themeCombo.select(2);
+        } else if (DBeaverPreferences.UI_THEME_MODE_LIGHT.equals(themeMode)) {
+            themeCombo.select(1);
+        } else {
+            themeCombo.select(0); // "auto" is the default
+        }
+
         BreadcrumbLocation breadcrumbLocation = DatabaseEditorPreferences.BreadcrumbLocation.get(store);
         statusBarShowBreadcrumbsCheck.setSelection(breadcrumbLocation != DatabaseEditorPreferences.BreadcrumbLocation.HIDDEN);
         statusBarBreadcrumbPositionCombo.select(breadcrumbLocation == DatabaseEditorPreferences.BreadcrumbLocation.IN_EDITORS ? 1 : 0);
@@ -304,6 +334,9 @@ public class PrefPageDatabaseUserInterface extends AbstractPrefPage implements I
             UIUtils.setComboSelection(clientTimezone, store.getDefaultString(ModelPreferences.CLIENT_TIMEZONE));
         }
 
+        // Theme mode default is "auto"
+        themeCombo.select(0);
+
         BreadcrumbLocation location = BreadcrumbLocation.getDefault(store);
         statusBarShowBreadcrumbsCheck.setSelection(location != BreadcrumbLocation.HIDDEN);
         statusBarBreadcrumbPositionCombo.select(location == BreadcrumbLocation.IN_STATUS_BAR ? 0 : 1);
@@ -323,6 +356,18 @@ public class PrefPageDatabaseUserInterface extends AbstractPrefPage implements I
     public boolean performOk()
     {
         DBPPreferenceStore store = DBWorkbench.getPlatform().getPreferenceStore();
+
+        // Save theme mode (available for all users)
+        String[] themeModes = {
+            DBeaverPreferences.UI_THEME_MODE_AUTO,
+            DBeaverPreferences.UI_THEME_MODE_LIGHT,
+            DBeaverPreferences.UI_THEME_MODE_DARK
+        };
+        int themeIndex = themeCombo.getSelectionIndex();
+        if (themeIndex >= 0 && themeIndex < themeModes.length) {
+            store.setValue(DBeaverPreferences.UI_THEME_MODE, themeModes[themeIndex]);
+        }
+        PrefUtils.savePreferenceStore(store);
 
         if (isStandalone) {
             store.setValue(UIPreferences.UI_USE_EMBEDDED_AUTH, useEmbeddedBrowserAuth.getSelection());
