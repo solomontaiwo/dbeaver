@@ -23,12 +23,14 @@ import org.eclipse.ui.IWorkbench;
 import org.eclipse.ui.PlatformUI;
 import org.jkiss.dbeaver.DBeaverPreferences;
 import org.jkiss.dbeaver.Log;
+import org.jkiss.dbeaver.model.preferences.DBPPreferenceListener;
 import org.jkiss.dbeaver.model.preferences.DBPPreferenceStore;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
 import org.jkiss.dbeaver.utils.RuntimeUtils;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Monitors the OS/system theme and switches the DBeaver Eclipse theme
@@ -57,8 +59,12 @@ public class SystemThemeMonitor {
     /** Eclipse E4 CSS theme ID for the dark theme. */
     private static final String ECLIPSE_THEME_DARK = "org.eclipse.e4.ui.css.theme.e4_dark";
 
+    /** Maximum time in seconds to wait for an OS theme-detection process to finish. */
+    private static final int PROCESS_TIMEOUT_SECONDS = 3;
+
     private final Display display;
     private boolean lastDark;
+    private DBPPreferenceListener prefListener;
 
     private SystemThemeMonitor(Display display) {
         this.display = display;
@@ -70,7 +76,7 @@ public class SystemThemeMonitor {
      */
     public static void install(Display display) {
         SystemThemeMonitor monitor = new SystemThemeMonitor(display);
-        monitor.applyTheme();
+        monitor.applyThemeAsync();
         monitor.startListening();
     }
 
@@ -81,20 +87,44 @@ public class SystemThemeMonitor {
     /**
      * Reads the current {@link DBeaverPreferences#UI_THEME_MODE} preference
      * and applies the corresponding Eclipse theme.
+     *
+     * <p>For the {@code "auto"} mode, OS detection is performed on a daemon
+     * background thread so the SWT UI thread is never blocked; the theme switch
+     * is then posted back to the UI thread via {@code asyncExec}.
      */
-    private void applyTheme() {
+    private void applyThemeAsync() {
         String mode = getThemeMode();
-        boolean useDark;
         if (THEME_MODE_DARK.equals(mode)) {
-            useDark = true;
+            lastDark = true;
+            switchEclipseTheme(true);
         } else if (THEME_MODE_LIGHT.equals(mode)) {
-            useDark = false;
+            lastDark = false;
+            switchEclipseTheme(false);
         } else {
-            // "auto" – follow the OS
-            useDark = isOsDarkMode();
+            // "auto" – detect OS dark mode off the UI thread
+            scheduleOsDetection();
         }
-        lastDark = useDark;
-        switchEclipseTheme(useDark);
+    }
+
+    /**
+     * Spawns a daemon background thread that runs {@link #isOsDarkMode()} and
+     * then posts the theme-switch back to the UI thread via {@code asyncExec}.
+     * Callers must be on the UI thread.
+     */
+    private void scheduleOsDetection() {
+        Thread t = new Thread(() -> {
+            boolean dark = isOsDarkMode();
+            if (!display.isDisposed()) {
+                display.asyncExec(() -> {
+                    if (dark != lastDark) {
+                        lastDark = dark;
+                        switchEclipseTheme(dark);
+                    }
+                });
+            }
+        }, "DBeaver-ThemeDetect");
+        t.setDaemon(true);
+        t.start();
     }
 
     private static String getThemeMode() {
@@ -163,12 +193,12 @@ public class SystemThemeMonitor {
     }
 
     private static boolean isWindowsDarkMode() throws Exception {
-        Process process = Runtime.getRuntime().exec(new String[]{
+        ProcessBuilder pb = new ProcessBuilder(
             "reg", "query",
             "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
             "/v", "AppsUseLightTheme"
-        });
-        String output = readProcessOutput(process);
+        );
+        String output = readProcessOutput(pb);
         // Example outputs:
         // "AppsUseLightTheme    REG_DWORD    0x0"   → dark mode
         // "AppsUseLightTheme    REG_DWORD    0x1"   → light mode
@@ -197,21 +227,18 @@ public class SystemThemeMonitor {
     }
 
     private static boolean isMacOsDarkMode() throws Exception {
-        Process process = Runtime.getRuntime().exec(new String[]{
-            "defaults", "read", "-g", "AppleInterfaceStyle"
-        });
-        String output = readProcessOutput(process).trim();
+        ProcessBuilder pb = new ProcessBuilder("defaults", "read", "-g", "AppleInterfaceStyle");
+        String output = readProcessOutput(pb).trim();
         return "Dark".equalsIgnoreCase(output);
     }
 
     private static boolean isLinuxDarkMode() throws Exception {
         // Try gsettings first (GNOME)
         try {
-            Process process = Runtime.getRuntime().exec(new String[]{
-                "gsettings", "get",
-                "org.gnome.desktop.interface", "color-scheme"
-            });
-            String output = readProcessOutput(process).trim().toLowerCase();
+            ProcessBuilder pb = new ProcessBuilder(
+                "gsettings", "get", "org.gnome.desktop.interface", "color-scheme"
+            );
+            String output = readProcessOutput(pb).trim().toLowerCase();
             if (output.contains("prefer-dark") || output.contains("dark")) {
                 return true;
             }
@@ -230,10 +257,10 @@ public class SystemThemeMonitor {
 
         // Fallback: KDE / Plasma
         try {
-            Process process = Runtime.getRuntime().exec(new String[]{
+            ProcessBuilder pb = new ProcessBuilder(
                 "kreadconfig5", "--group", "General", "--key", "ColorScheme"
-            });
-            String output = readProcessOutput(process).trim().toLowerCase();
+            );
+            String output = readProcessOutput(pb).trim().toLowerCase();
             if (output.contains("dark")) {
                 return true;
             }
@@ -244,7 +271,20 @@ public class SystemThemeMonitor {
         return false;
     }
 
-    private static String readProcessOutput(Process process) throws Exception {
+    /**
+     * Starts the process described by {@code pb}, reads its combined
+     * stdout+stderr output, waits up to {@value #PROCESS_TIMEOUT_SECONDS} seconds
+     * for it to finish, and destroys it if it times out.
+     *
+     * <p>Redirecting stderr to stdout via
+     * {@link ProcessBuilder#redirectErrorStream(boolean)} ensures that the
+     * stderr pipe buffer never fills up and deadlocks the child process while
+     * we are draining stdout.
+     */
+    @org.jkiss.code.NotNull
+    private static String readProcessOutput(ProcessBuilder pb) throws Exception {
+        pb.redirectErrorStream(true); // merge stderr into stdout
+        Process process = pb.start();
         StringBuilder sb = new StringBuilder();
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(process.getInputStream()))) {
@@ -253,9 +293,14 @@ public class SystemThemeMonitor {
                 sb.append(line).append('\n');
             }
         }
-        int exitCode = process.waitFor();
-        if (exitCode != 0 && sb.length() == 0) {
-            // No useful output and non-zero exit – treat as "unknown"
+        boolean finished = process.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        if (!finished) {
+            process.destroy();
+            log.debug("OS theme-detection process timed out and was destroyed");
+            return "";
+        }
+        if (process.exitValue() != 0 && sb.length() == 0) {
+            // Non-zero exit with no output – treat as "unknown"
             return "";
         }
         return sb.toString();
@@ -270,27 +315,32 @@ public class SystemThemeMonitor {
         // (works on Windows and macOS; GTK fires it too on theme change).
         display.addListener(SWT.Settings, event -> onOsSettingsChanged());
 
-        // Also listen for preference changes so that selecting a different
-        // theme mode in Preferences takes effect immediately.
-        DBWorkbench.getPlatform().getPreferenceStore()
-            .addPropertyChangeListener(evt -> {
-                if (DBeaverPreferences.UI_THEME_MODE.equals(evt.getProperty())) {
-                    display.asyncExec(this::applyTheme);
+        // Listen for preference changes so that selecting a different theme mode
+        // in Preferences takes effect immediately.
+        prefListener = evt -> {
+            if (DBeaverPreferences.UI_THEME_MODE.equals(evt.getProperty())) {
+                if (!display.isDisposed()) {
+                    display.asyncExec(this::applyThemeAsync);
                 }
-            });
+            }
+        };
+        DBWorkbench.getPlatform().getPreferenceStore().addPropertyChangeListener(prefListener);
+
+        // Remove the preference listener when the display is disposed to
+        // prevent SWTException (invalid thread access / disposed widget) and
+        // dangling references during workbench shutdown.
+        display.disposeExec(() ->
+            DBWorkbench.getPlatform().getPreferenceStore().removePropertyChangeListener(prefListener)
+        );
     }
 
     private void onOsSettingsChanged() {
         String mode = getThemeMode();
         if (!THEME_MODE_AUTO.equals(mode)) {
-            // Not in auto mode – user has explicitly chosen a theme
+            // User has explicitly chosen a theme – ignore OS changes
             return;
         }
-        boolean dark = isOsDarkMode();
-        if (dark == lastDark) {
-            return;
-        }
-        lastDark = dark;
-        switchEclipseTheme(dark);
+        // Run OS detection on a background thread to avoid blocking the UI.
+        scheduleOsDetection();
     }
 }
